@@ -10,9 +10,9 @@ import com.qualcomm.robotcore.util.ElapsedTime;
 
 @Autonomous
 
-public class MegatronAutoFar extends LinearOpMode {
+public class MegatronAutoFarBlue extends LinearOpMode {
     
-      DcMotorEx m1, m2, m3, m4, leftThrow, rightThrow, feeder;
+      DcMotorEx m1, m2, m3, m4, leftThrow, rightThrow, topFeeder, bottomFeeder;
       Servo trigger;
       
       ElapsedTime runTime = new ElapsedTime();
@@ -34,10 +34,10 @@ public class MegatronAutoFar extends LinearOpMode {
         p2 /= max;
         p3 /= max;
         p4 /= max;
-        m1.setPower(p1);
-        m2.setPower(p2);
-        m3.setPower(p3);
-        m4.setPower(p4);
+        m1.setPower(p1*0.5);
+        m2.setPower(p2*0.5);
+        m3.setPower(p3*0.5);
+        m4.setPower(p4*0.5);
     }
     
     private void stopDrive(){
@@ -62,8 +62,9 @@ public class MegatronAutoFar extends LinearOpMode {
         //Trigger Servo
         trigger = hardwareMap.get(Servo.class, "trigger");
         
-        //Feeder motor
-        feeder = hardwareMap.get(DcMotorEx.class, "feeder"); //front left
+        ///Feeder motor
+        topFeeder = hardwareMap.get(DcMotorEx.class, "topFeeder");
+        bottomFeeder = hardwareMap.get(DcMotorEx.class, "bottomFeeder");
         
         
         //Motor direction, flip to reverse direction of robot (may need to reorder motors)
@@ -74,9 +75,10 @@ public class MegatronAutoFar extends LinearOpMode {
         
         rightThrow.setDirection(DcMotor.Direction.REVERSE);
         
-        leftThrow.setZeroPowerBehavior(DcMotor.ZeroPowerBehavior.BRAKE);
-        rightThrow.setZeroPowerBehavior(DcMotor.ZeroPowerBehavior.BRAKE);
-        feeder.setZeroPowerBehavior(DcMotor.ZeroPowerBehavior.BRAKE);
+        leftThrow.setZeroPowerBehavior(DcMotor.ZeroPowerBehavior.FLOAT);
+        rightThrow.setZeroPowerBehavior(DcMotor.ZeroPowerBehavior.FLOAT);
+        topFeeder.setZeroPowerBehavior(DcMotor.ZeroPowerBehavior.BRAKE);
+        bottomFeeder.setZeroPowerBehavior(DcMotor.ZeroPowerBehavior.BRAKE);
         
         m1.setZeroPowerBehavior(DcMotor.ZeroPowerBehavior.BRAKE);
         m2.setZeroPowerBehavior(DcMotor.ZeroPowerBehavior.BRAKE);
@@ -113,9 +115,12 @@ public class MegatronAutoFar extends LinearOpMode {
     
         runTime.reset();
         
-        leftThrow.setPower(-0.43);
-        rightThrow.setPower(-0.43);
-        sleep(200);
+        // leftThrow.setPower(-0.43);
+        // rightThrow.setPower(-0.43);
+        
+        leftThrow.setPower(-0.75);
+        rightThrow.setPower(-0.75);
+        sleep(300);
         for (int i = 0; i < 3; i++){
             // Start timer
             runTime.reset();
@@ -130,21 +135,30 @@ public class MegatronAutoFar extends LinearOpMode {
             trigger.setPosition(0.6);
             sleep(1000);
          
-            feeder.setPower(-1);
-            sleep(1300);
-            feeder.setPower(0);
+            topFeeder.setPower(-1);
+            bottomFeeder.setPower(1);
+            sleep(1290);
+            topFeeder.setPower(0);
+            bottomFeeder.setPower(0);
+            
+
         }
+        
+        
+        
         leftThrow.setPower(0);
         rightThrow.setPower(0);
-        feeder.setPower(0);
+        topFeeder.setPower(0);
+        bottomFeeder.setPower(0);
         trigger.setPosition(0.6);
         sleep(400);
         
-        //Drive off of the line
-        drive(0.5,0,0);
-        sleep(500);
+        //Drive off of the line BLUE
+        drive(0,1.5,0);
+        sleep(450);
+        drive(1.5,0,0);
+        sleep(600);
         stopDrive();
-        
         
     }
 }
