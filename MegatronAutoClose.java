@@ -12,7 +12,7 @@ import com.qualcomm.robotcore.util.ElapsedTime;
 
 public class MegatronAutoClose extends LinearOpMode {
     
-      DcMotorEx m1, m2, m3, m4, leftThrow, rightThrow, feeder;
+      DcMotorEx m1, m2, m3, m4, leftThrow, rightThrow, topFeeder, bottomFeeder;
       Servo trigger;
       
       ElapsedTime runTime = new ElapsedTime();
@@ -62,8 +62,9 @@ public class MegatronAutoClose extends LinearOpMode {
         //Trigger Servo
         trigger = hardwareMap.get(Servo.class, "trigger");
         
-        //Feeder motor
-        feeder = hardwareMap.get(DcMotorEx.class, "feeder"); //front left
+        ///Feeder motor
+        topFeeder = hardwareMap.get(DcMotorEx.class, "topFeeder");
+        bottomFeeder = hardwareMap.get(DcMotorEx.class, "bottomFeeder");
         
         
         //Motor direction, flip to reverse direction of robot (may need to reorder motors)
@@ -74,9 +75,10 @@ public class MegatronAutoClose extends LinearOpMode {
         
         rightThrow.setDirection(DcMotor.Direction.REVERSE);
         
-        leftThrow.setZeroPowerBehavior(DcMotor.ZeroPowerBehavior.BRAKE);
-        rightThrow.setZeroPowerBehavior(DcMotor.ZeroPowerBehavior.BRAKE);
-        feeder.setZeroPowerBehavior(DcMotor.ZeroPowerBehavior.BRAKE);
+        leftThrow.setZeroPowerBehavior(DcMotor.ZeroPowerBehavior.FLOAT);
+        rightThrow.setZeroPowerBehavior(DcMotor.ZeroPowerBehavior.FLOAT);
+        topFeeder.setZeroPowerBehavior(DcMotor.ZeroPowerBehavior.BRAKE);
+        bottomFeeder.setZeroPowerBehavior(DcMotor.ZeroPowerBehavior.BRAKE);
         
         m1.setZeroPowerBehavior(DcMotor.ZeroPowerBehavior.BRAKE);
         m2.setZeroPowerBehavior(DcMotor.ZeroPowerBehavior.BRAKE);
@@ -104,6 +106,7 @@ public class MegatronAutoClose extends LinearOpMode {
         
         boolean goAhead = false;
         
+        double waitAutoTimer = 0;
         
         waitForStart();
         runTime.reset();
@@ -111,23 +114,27 @@ public class MegatronAutoClose extends LinearOpMode {
         
         //Move off of the wall
         drive(-0.5,0,0);
-        sleep(1470);
+        sleep(1100);
         stopDrive();
         
         runTime.reset();
         
         
-        leftThrow.setPower(-0.40);
-        rightThrow.setPower(-0.40);
-
-        // Start timer
-        runTime.reset();
-
+        leftThrow.setPower(-0.4);
+        rightThrow.setPower(-0.4);
+        sleep(400);
         for (int i = 0; i < 3; i++){
-            // Start timer
+            
             // Start timer
             runTime.reset();
-            while (opModeIsActive() && runTime.seconds() < 5.0) {
+            if(i==0){
+                waitAutoTimer = 6.0;
+            }else{
+                waitAutoTimer = 3.0;
+            }
+            
+            
+            while (opModeIsActive() && runTime.seconds() < waitAutoTimer) {
                 idle();
             }
             //Now move the trigger
@@ -138,17 +145,22 @@ public class MegatronAutoClose extends LinearOpMode {
             trigger.setPosition(0.6);
             sleep(1000);
          
-            feeder.setPower(-1);
-            sleep(1300);
-            feeder.setPower(0);
+            topFeeder.setPower(-1);
+            bottomFeeder.setPower(1);
+            sleep(1290);
+            topFeeder.setPower(0);
+            bottomFeeder.setPower(0);
+            
+
         }
         
         leftThrow.setPower(0);
         rightThrow.setPower(0);
-        feeder.setPower(0);
+        topFeeder.setPower(0);
+        bottomFeeder.setPower(0);
         trigger.setPosition(0.7);
         sleep(400);
-        stopDrive();
+        
         
         
     }
