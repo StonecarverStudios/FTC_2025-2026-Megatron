@@ -23,15 +23,16 @@ public class Megatron extends LinearOpMode {
     
     Servo trigger;
     
-    //DistanceSensor topFeederSensor;
+    DistanceSensor topSensor, bottomSensor, cupSensor;
     
+    //Timer
     ElapsedTime runTime = new ElapsedTime();
     
+    //Webcam
     AprilTagWebcam aprilTagWebcam = new AprilTagWebcam();
 
     double lastAutoTurn = 0;
 
-    
     @Override
     public void runOpMode(){
         
@@ -42,7 +43,10 @@ public class Megatron extends LinearOpMode {
         m3 = hardwareMap.get(DcMotorEx.class, "fr"); //front right
         m4 = hardwareMap.get(DcMotorEx.class, "fl"); //front left
         
-        //topFeederSensor = hardwareMap.get(DistanceSensor.class, "BallDistanceSensor");
+        topSensor = hardwareMap.get(DistanceSensor.class, "topSensor");
+        bottomSensor = hardwareMap.get(DistanceSensor.class, "topSensor");
+        cupSensor = hardwareMap.get(DistanceSensor.class, "cupSensor");
+
 
         
         //Launcher motors
@@ -82,15 +86,15 @@ public class Megatron extends LinearOpMode {
 
 
         //Reset the encoders on Init, and set them to the correct mode 
-        // m1.setMode(DcMotor.RunMode.STOP_AND_RESET_ENCODER);
-        // m2.setMode(DcMotor.RunMode.STOP_AND_RESET_ENCODER);
-        // m3.setMode(DcMotor.RunMode.STOP_AND_RESET_ENCODER);
-        // m4.setMode(DcMotor.RunMode.STOP_AND_RESET_ENCODER);
+        m1.setMode(DcMotor.RunMode.STOP_AND_RESET_ENCODER);
+        m2.setMode(DcMotor.RunMode.STOP_AND_RESET_ENCODER);
+        m3.setMode(DcMotor.RunMode.STOP_AND_RESET_ENCODER);
+        m4.setMode(DcMotor.RunMode.STOP_AND_RESET_ENCODER);
         
-        // m1.setMode(DcMotor.RunMode.RUN_USING_ENCODER);
-        // m2.setMode(DcMotor.RunMode.RUN_USING_ENCODER);
-        // m3.setMode(DcMotor.RunMode.RUN_USING_ENCODER);
-        // m4.setMode(DcMotor.RunMode.RUN_USING_ENCODER);
+        m1.setMode(DcMotor.RunMode.RUN_USING_ENCODER);
+        m2.setMode(DcMotor.RunMode.RUN_USING_ENCODER);
+        m3.setMode(DcMotor.RunMode.RUN_USING_ENCODER);
+        m4.setMode(DcMotor.RunMode.RUN_USING_ENCODER);
         
         
         
@@ -102,21 +106,25 @@ public class Megatron extends LinearOpMode {
         //init triger
         trigger.setPosition(0.6);
         
+        
         boolean farRange = true; // default to far range throw
         
         telemetry.addData("Press Start When Ready","");
         telemetry.addData("Far Range Mode Activated","");
         telemetry.update();
         
-        boolean locked = false;
         
-        boolean isLogged = false;
+        //Sensor Variables
+        boolean topSensorDetect = true;
+        boolean bottomSensorDetect = true;
+        boolean cupSensorDetect = true;
+        
         
         //Power to the throwing motors
-        double closePower = 0.02;
-        double farPower = 0.73;
+        double closeVelocity = 1700.0;
+        double farVelocity = 3000.0;
 
-       
+        //isLogged for fine power adjuster
         boolean yLastPressed = false;
         boolean xLastPressed = false;
       
@@ -133,7 +141,7 @@ public class Megatron extends LinearOpMode {
             
             double BEARING_OFFSET;
             
-            // ================= AIMBOT TURN LOGIC =================
+        // ================= AIMBOT TURN LOGIC =========================
             if (farRange){
                 BEARING_OFFSET = 7.0; // degrees (positive / Aim Left)
             }else{
@@ -189,9 +197,6 @@ public class Megatron extends LinearOpMode {
             double pa = manualTurn + autoTurn;
             pa = Math.max(-1.0, Math.min(1.0, pa));
 
-            // ====================================================
-
-
             
             // BODY MOVEMENT
             double px = gamepad1.left_stick_x; //The power of the left stick on the x axis
@@ -222,34 +227,36 @@ public class Megatron extends LinearOpMode {
             m3.setPower(p3);
             m4.setPower(p4);
             
-            
+    //============================================================
   
-           // === Fine Power Adjustment For Launching - Single press only ===
+  
+  
+            // === Fine Power Adjustment For Launching - Single press only ===
             // increases/decreases by increments of 0.2
             boolean yPressed = gamepad2.y;
             boolean xPressed = gamepad2.x;
             
             if (yPressed && !yLastPressed) {  // Button just went down
                 if (farRange) {
-                    farPower = Math.min(1, farPower + 0.02);
+                    farVelocity = Math.min(6000, farVelocity + 500);
                 } else {
-                    closePower = Math.min(1, closePower + 0.02);
+                    closeVelocity = Math.min(6000, closeVelocity + 500);
                 }
             }
             
             if (xPressed && !xLastPressed) {  // Button just went down
                 if (farRange) {
-                    farPower = Math.max(0.04, farPower - 0.02);
+                    farVelocity = Math.max(500, farVelocity - 500);
                 } else {
-                    closePower = Math.max(0.04, closePower - 0.02);
+                    closeVelocity = Math.max(500, closeVelocity - 500);
                 }
             }
             
             yLastPressed = yPressed;
             xLastPressed = xPressed;
-            
+                
+                
                         
-            
             double goalBearing = 0;
             if (id20 != null) {
                 goalBearing = id20.ftcPose.bearing;
@@ -266,66 +273,165 @@ public class Megatron extends LinearOpMode {
                 farRange = true;  //far range mode
             }
             
-            
-            //Launching
-            if (gamepad2.right_trigger > 0) {
+            //Init Sensors
+            //BottomSesnor Detect
+            if (bottomSensor.getDistance(DistanceUnit.CM) < 20) {
+                bottomSensorDetect = true;
                 
-                double targetPower;
+            } else {
+                bottomSensorDetect = false;
+            }
+            
+            //TopSesnor Detect
+            if (topSensor.getDistance(DistanceUnit.CM) < 20) {
+                topSensorDetect = true;
+                
+            } else {
+                topSensorDetect = false;
+            }
+            
+            //CupSesnor Detect
+            if (cupSensor.getDistance(DistanceUnit.CM) < 20) {
+                cupSensorDetect = true;
+                
+            } else {
+                cupSensorDetect = false;
+            }
+            
+            //Launching and trigger system Manual (Legacy)
+                // //Launching
+                // if (gamepad2.right_trigger > 0) {
+                    
+                //     double targetVelocity;
+                    
+                //     if(farRange){
+                //         targetVelocity = farVelocity;
+                //     }else{
+                //         targetVelocity = closeVelocity;
+                //     }
+                    
+    
+                //     leftThrow.setVelocity(targetVelocity);
+                //     rightThrow.setVelocity(targetVelocity);
+                // } else {
+                //     leftThrow.setVelocity(0);
+                //     rightThrow.setVelocity(0);
+                // }
+                            
+                // //Trigger
+                // if(gamepad2.a){
+                //     trigger.setPosition(0.2);
+                //     runTime.reset();
+                // }else if(runTime.seconds() > 0.5 ){
+                //     trigger.setPosition(0.6);
+                // }
+            
+            //Auto Launching System
+            if(gamepad2.a){
+                double targetVelocity;
+                runTime.reset();
                 
                 if(farRange){
-                    targetPower = farPower;
+                    targetVelocity = farVelocity;
                 }else{
-                    targetPower = closePower;
+                    targetVelocity = closeVelocity;
                 }
                 
-
-                leftThrow.setPower(targetPower);
-                rightThrow.setPower(targetPower);
-            } else {
-                leftThrow.setPower(0);
-                rightThrow.setPower(0);
-            }
+                leftThrow.setVelocity(targetVelocity);
+                rightThrow.setVelocity(targetVelocity);
+                for (int i = 0; i < 3; i++){
+                    double waitAutoTimer;
+                    if(i==0){
+                        waitAutoTimer = 3.0;
+                    }else{
+                        waitAutoTimer = 1.0;
+                    }
+                    
+                    while (runTime.seconds() < waitAutoTimer) {
+                        idle();
+                    }
+                    // if (cupSensorDetect || cupSensorDetect && topFeederDetect && bottomFeederDetect){
+                    //     trigger.setPosition(0.2);
+                    //     runTime.reset();
                         
-            
-            //Trigger
-            if(gamepad2.a){
-                trigger.setPosition(0.28);
-                runTime.reset();
-            }else if(runTime.seconds() > 0.5 ){
-                trigger.setPosition(0.6);
+                    //     if(runTime.seconds() > 0.5 ){
+                    //         trigger.setPosition(0.6);
+                    //     }
+                    // }
+                    
+                }
+               
             }
+            
+            
+            
             
     
-            //Feeder Forward
-            //Top Feeder
+            //Feeder Logic Legacy
+                // //Top Feeder
+                // if (gamepad2.right_stick_y != 0){
+                //     double feedPower = gamepad2.right_stick_y;
+                
+                //     topFeeder.setPower(feedPower);
+                // }else {
+                //     double feedPower = 0;
+                
+                //     topFeeder.setPower(feedPower);
+                // }
+                
+                // //Bottom Feeder
+                // if (gamepad2.left_stick_y != 0){
+                //     double feedPower = -gamepad2.left_stick_y;
+                
+                //     bottomFeeder.setPower(feedPower);
+                // }else {
+                //     double feedPower = 0;
+                
+                //     bottomFeeder.setPower(feedPower);
+                // }
+            
+            //One joystick semi-auto feeder
+            //Feeder Logic System
             if (gamepad2.right_stick_y != 0){
-                double feedPower = gamepad2.right_stick_y;
-            
-                topFeeder.setPower(feedPower);
-            }else {
-                double feedPower = 0;
-            
-                topFeeder.setPower(feedPower);
+                
+                // no ball in cup, but balls in bottom and top slots -> move to fill cup.    
+                if(bottomSensorDetect && topSensorDetect){
+                    while(cupSensorDetect == false && opModeIsActive()){
+                        topFeeder.setPower(gamepad2.right_stick_y);
+                        bottomFeeder.setPower(-gamepad2.right_stick_y);
+                    }
+                //ball in cup and top slot -> only move bottom to fill bottom slot
+                }else if(topSensorDetect && cupSensorDetect){
+                    while(bottomSensorDetect == false && opModeIsActive()){
+                        bottomFeeder.setPower(-gamepad2.right_stick_y);
+                    }
+                    
+                //ball in cup and bottom slot, but not in top slot -> move until top filled
+                }else if(bottomSensorDetect && cupSensorDetect){
+                    while(topSensorDetect == false&& opModeIsActive()){
+                        topFeeder.setPower(gamepad2.right_stick_y);
+                        bottomFeeder.setPower(-gamepad2.right_stick_y);
+                    }
+                
+                //only one ball in either top or bottom -> move to fill cup   
+                }else if(bottomSensorDetect || topSensorDetect){
+                    while (cupSensorDetect == false&& opModeIsActive()){
+                        topFeeder.setPower(gamepad2.right_stick_y);
+                        bottomFeeder.setPower(-gamepad2.right_stick_y);
+                    }
+                    
+                //no balls, empty load -> move until state fufilled
+                }else{
+                    topFeeder.setPower(gamepad2.right_stick_y);
+                    bottomFeeder.setPower(-gamepad2.right_stick_y);
+                }
+                
             }
             
-            //Bottom Feeder
-            if (gamepad2.left_stick_y != 0){
-                double feedPower = -gamepad2.left_stick_y;
-            
-                bottomFeeder.setPower(feedPower);
-            }else {
-                double feedPower = 0;
-            
-                bottomFeeder.setPower(feedPower);
-            }
-            
-           // double distanceMeters = topFeederSensor.getDistance(DistanceUnit.METER);
-        
+            //=========================TELEMETRY===============================
             
             //ID 20 Telemetry from WebCam
-                //aprilTagWebcam.displayDetectionTelemetry(id20);
-            
-            
+            //aprilTagWebcam.displayDetectionTelemetry(id20);
             
             //Display Positions of the motors
             telemetry.addData("Motor Encoders"," %d %d %d %d", m1.getCurrentPosition(), m2.getCurrentPosition(),
@@ -339,11 +445,32 @@ public class Megatron extends LinearOpMode {
             }
             
             telemetry.addLine();
-
+            
+            //Testing sensors for Feeder
+            if(cupSensorDetect == true){
+                telemetry.addData("Cup Sensor Detecting", "");
+            }else{
+                 telemetry.addData("No Cup Sensor", "");
+            }
+            
+            if(topSensorDetect == true){
+                telemetry.addData("Top Sensor Detecting", "");
+            }else{
+                 telemetry.addData("No Top Sensor", "");
+            }
+            
+            if(bottomSensorDetect == true){
+                telemetry.addData("Bottom Sensor Detecting", "");
+            }else{
+                 telemetry.addData("No Bottom Sensor", "");
+            }
+            
+            
+            telemetry.addLine();
             
             //Display far and close power values
-            telemetry.addData("Close Motor Power", "%.2f", closePower);
-            telemetry.addData("Far Motor Power", "%.2f", farPower);
+            telemetry.addData("Close Motor Velocity", "%.2f", closeVelocity);
+            telemetry.addData("Far Motor Velocity", "%.2f", farVelocity);
             
             telemetry.update();
             
