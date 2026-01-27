@@ -1,3 +1,3 @@
 # FTC 2025-2026 Code for Megatron
 
-With Auto and Teleop for 2nd meet
+Includes Basic Auto for Shooting, Teleop with auto aiming,  and semi-auto firing
