@@ -1,46 +1,42 @@
+package org.firstinspires.ftc.teamcode;
+
 import com.qualcomm.robotcore.eventloop.opmode.TeleOp;
-import org.firstinspires.ftc.robotcore.external.navigation.DistanceUnit;
-import com.qualcomm.robotcore.hardware.DistanceSensor;
-import org.firstinspires.ftc.robotcore.external.navigation.AngleUnit;
-import com.qualcomm.robotcore.util.ElapsedTime;
-import com.qualcomm.robotcore.hardware.Servo;
-import org.firstinspires.ftc.robotcore.external.State;
 import com.qualcomm.robotcore.eventloop.opmode.LinearOpMode;
 import com.qualcomm.robotcore.hardware.DcMotorEx;
 import com.qualcomm.robotcore.hardware.DcMotor;
+import com.qualcomm.robotcore.hardware.Servo;
+import com.qualcomm.robotcore.hardware.DistanceSensor;
+import com.qualcomm.robotcore.hardware.IMU;
+import com.qualcomm.hardware.rev.RevHubOrientationOnRobot;
+import com.qualcomm.robotcore.util.ElapsedTime;
+import org.firstinspires.ftc.robotcore.external.navigation.YawPitchRollAngles;
+import org.firstinspires.ftc.robotcore.external.navigation.AngleUnit;
 import org.firstinspires.ftc.teamcode.AprilTagWebcam;
 import org.firstinspires.ftc.vision.apriltag.AprilTagDetection;
-import com.qualcomm.hardware.rev.RevHubOrientationOnRobot;
-import com.qualcomm.robotcore.hardware.IMU;
-import org.firstinspires.ftc.robotcore.external.navigation.YawPitchRollAngles;
-
 
 
 @TeleOp(name="Megatron")
 public class Megatron extends LinearOpMode {
-    
+
+    //================HARDWARE-====================//
+
+    //Drive Motors            //Shooter              //Feeder
     DcMotorEx m1, m2, m3, m4, leftThrow, rightThrow, topFeeder, bottomFeeder;
-    
+
+    //Shooter cup
     Servo trigger;
-    
+
+    //Sensors
     DistanceSensor topSensor, bottomSensor, cupSensor;
+    IMU imu;
     
-    //Timer
-    ElapsedTime runTime = new ElapsedTime();
-    
-    //Webcam
+    //Vision
     AprilTagWebcam aprilTagWebcam = new AprilTagWebcam();
 
-    double lastAutoTurn = 0;
-
-    //Set up State Machine for auto Launching
+    
+    //=================STATES======================//
     enum ShootState {
-        IDLE,
-        SPIN_UP,
-        FEEDING,
-        FIRING,
-        WAIT_CLEAR,
-        DONE
+        IDLE, SPIN_UP, FEEDING, FIRING, WAIT_CLEAR, DONE
     }
     
     ShootState shootState = ShootState.IDLE;
@@ -49,309 +45,231 @@ public class Megatron extends LinearOpMode {
     int ballsShot = 0;
     
     ElapsedTime shootTimer = new ElapsedTime();
+    ElapsedTime runTime = new ElapsedTime();
     
     boolean aLastPressed = false;
     boolean cupLastDetect = true;
-        
+
+
+    //====================DRIVE CONTROL=========================//
+    double lastTurnCmd = 0; // for slew limiting
 
     @Override
     public void runOpMode(){
+
+        //====================HARDWARE MAP=========================//
         
-        // Wheels, ordered accordingly:
-        // Top Left, Back Left, Front Right, Back Right
+        // Drive Motors
         m1 = hardwareMap.get(DcMotorEx.class, "bl"); //back left
         m2 = hardwareMap.get(DcMotorEx.class, "br"); //back right
         m3 = hardwareMap.get(DcMotorEx.class, "fr"); //front right
         m4 = hardwareMap.get(DcMotorEx.class, "fl"); //front left
-        
-        topSensor = hardwareMap.get(DistanceSensor.class, "topSensor");
-        bottomSensor = hardwareMap.get(DistanceSensor.class, "bottomSensor");
-        cupSensor = hardwareMap.get(DistanceSensor.class, "cupSensor");
 
         //Launcher motors
         leftThrow = hardwareMap.get(DcMotorEx.class, "leftThrow");
         rightThrow = hardwareMap.get(DcMotorEx.class, "rightThrow");
-    
-        //Trigger Servot
-        trigger = hardwareMap.get(Servo.class, "trigger");
-        
+
         //Feeder motor
         topFeeder = hardwareMap.get(DcMotorEx.class, "topFeeder");
         bottomFeeder = hardwareMap.get(DcMotorEx.class, "bottomFeeder");
-        
-        
-        //Motor direction, flip to reverse direction of robot (may need to reorder motors)
-        //m1.setDirection(DcMotor.Direction.REVERSE);
+
+        //Trigger Servo
+        trigger = hardwareMap.get(Servo.class, "trigger");
+
+        //Sensors
+        topSensor = hardwareMap.get(DistanceSensor.class, "topSensor");
+        bottomSensor = hardwareMap.get(DistanceSensor.class, "bottomSensor");
+        cupSensor = hardwareMap.get(DistanceSensor.class, "cupSensor");
+
+        //IMU
+        imu = hardwareMap.get(IMU.class, "imu");
+        IMU.Parameters imuParams = new IMU.Parameters(
+            new RevHubOrientationOnRobot(
+                //Adjust orientation if hub is mounted differently.
+                RevHubOrientationOnRobot.LogoFacingDirection.UP,
+                RevHubOrientationOnRobot.UsbFacingDirection.FORWARD
+            )
+        );
+        imu.initialize(imuParams);
+        imu.resetYaw();
+
+        //====================HARDWARE MAP=========================//
+
+        //Drive Motor Directions
         m2.setDirection(DcMotor.Direction.REVERSE);
         m3.setDirection(DcMotor.Direction.REVERSE);
         m4.setDirection(DcMotor.Direction.REVERSE);
+
+        //Shooter Direction
         leftThrow.setDirection(DcMotor.Direction.REVERSE);
-        
-      
-        
-        leftThrow.setZeroPowerBehavior(DcMotor.ZeroPowerBehavior.FLOAT);
-        rightThrow.setZeroPowerBehavior(DcMotor.ZeroPowerBehavior.FLOAT);
-        
-        topFeeder.setZeroPowerBehavior(DcMotor.ZeroPowerBehavior.BRAKE);
-        bottomFeeder.setZeroPowerBehavior(DcMotor.ZeroPowerBehavior.BRAKE);
-        
+
+        //Zero Power Behaviors
         m1.setZeroPowerBehavior(DcMotor.ZeroPowerBehavior.BRAKE);
         m2.setZeroPowerBehavior(DcMotor.ZeroPowerBehavior.BRAKE);
         m3.setZeroPowerBehavior(DcMotor.ZeroPowerBehavior.BRAKE);
         m4.setZeroPowerBehavior(DcMotor.ZeroPowerBehavior.BRAKE);
+        topFeeder.setZeroPowerBehavior(DcMotor.ZeroPowerBehavior.BRAKE);
+        bottomFeeder.setZeroPowerBehavior(DcMotor.ZeroPowerBehavior.BRAKE);
+        
+        leftThrow.setZeroPowerBehavior(DcMotor.ZeroPowerBehavior.FLOAT);
+        rightThrow.setZeroPowerBehavior(DcMotor.ZeroPowerBehavior.FLOAT);
 
-
+        //Motor Modes
         //Reset the encoders on Init, and set them to the correct mode 
-        m1.setMode(DcMotor.RunMode.STOP_AND_RESET_ENCODER);
-        m2.setMode(DcMotor.RunMode.STOP_AND_RESET_ENCODER);
-        m3.setMode(DcMotor.RunMode.STOP_AND_RESET_ENCODER);
-        m4.setMode(DcMotor.RunMode.STOP_AND_RESET_ENCODER);
-        
-        leftThrow.setMode(DcMotor.RunMode.STOP_AND_RESET_ENCODER);
-        rightThrow.setMode(DcMotor.RunMode.STOP_AND_RESET_ENCODER);
-        
-        m1.setMode(DcMotor.RunMode.RUN_USING_ENCODER);
-        m2.setMode(DcMotor.RunMode.RUN_USING_ENCODER);
-        m3.setMode(DcMotor.RunMode.RUN_USING_ENCODER);
-        m4.setMode(DcMotor.RunMode.RUN_USING_ENCODER);
-        
+        m1.setMode(DcMotor.RunMode.RUN_WITHOUT_ENCODER);
+        m2.setMode(DcMotor.RunMode.RUN_WITHOUT_ENCODER);
+        m3.setMode(DcMotor.RunMode.RUN_WITHOUT_ENCODER);
+        m4.setMode(DcMotor.RunMode.RUN_WITHOUT_ENCODER);
         leftThrow.setMode(DcMotor.RunMode.RUN_USING_ENCODER);
         rightThrow.setMode(DcMotor.RunMode.RUN_USING_ENCODER);
 
-        
-        //WebCam init
-        aprilTagWebcam.init(hardwareMap, telemetry);
-        
+        leftThrow.setMode(DcMotor.RunMode.STOP_AND_RESET_ENCODER);
+        rightThrow.setMode(DcMotor.RunMode.STOP_AND_RESET_ENCODER);
+
         //init triger
         trigger.setPosition(0.6);
+        
+        //init WebCam
+        aprilTagWebcam.init(hardwareMap, telemetry);
 
+        //====================USER SETTINGS=========================//
         //Default shooting to far
         boolean farRange = true;
         
-        telemetry.addData("Press Start When Ready","");
-        telemetry.addData("Far Range Mode Activated","");
-        telemetry.update();
+        //Power to the throwing motors
+        double closeVelocity = 1700.0;
+        double farVelocity = 3000.0
         
         
+
+        //====================OTHER SETTINGS / INIT VARIABLES=========================//
+        //IMU
+        double getHeadingDeg() {
+            YawPitchRollAngles ypr = imu.getRobotYawPitchRollAngles();
+            return ypr.getYaw(AngleUnit.DEGREES);
+        }
+        double lastTurnCmd = 0;
+
         //Sensor Variables
         boolean topSensorDetect = true;
         boolean bottomSensorDetect = true;
         boolean cupSensorDetect = true;
-        
-        //Power to the throwing motors
-        double closeVelocity = 1700.0;
-        double farVelocity = 3000.0;
-
+    
         //isLogged for fine power adjuster
         boolean yLastPressed = false;
         boolean xLastPressed = false;
-      
+
+        //====================READY TO START=========================//
+        telemetry.addData("Press Start When Ready","");
+        telemetry.addData("Far Range Mode Activated","");
+        telemetry.update();
+        
         waitForStart();
         runTime.reset();
 
+
+        //====================MAIN LOOP=========================//
         while (opModeIsActive()) {
 
-            //Update Webcam
+            //Update Vision
             aprilTagWebcam.update();
             AprilTagDetection id20 = aprilTagWebcam.getTagBySpecificId(20); //Blue Goal
             AprilTagDetection id24 = aprilTagWebcam.getTagBySpecificId(24); //Red Goal
             
-            double BEARING_OFFSET;
-            
-        // ================= AIMBOT TURN LOGIC =========================
-            if (farRange){
-                BEARING_OFFSET = 7.0; // degrees (positive / Aim Left)
-            }else{
-                BEARING_OFFSET = 0;
-            }
-            
-            if (id24 != null) {
-                BEARING_OFFSET = 7.0;
-            }else if (id20 != null){
-                BEARING_OFFSET = 1.5;
-            }
-             
-            double manualTurn = gamepad1.left_trigger - gamepad1.right_trigger;
-            double autoTurn = 0;
-            
-            double AIM_KP = 0.02;        // proportional gain
-            double DEAD_BAND = 1.5;      // degrees
-            double MAX_TURN = 0.5;       // max auto turn power
-            double MIN_TURN = 0.05;      // minimum motor power
-            double SMOOTHING = 0.15;     // 0–1 (higher = snappier)
-            
-            // Only run auto-aim if Y is pressed
+            //Auto Aim Calculation 
+            double BEARING_OFFSET = farRange ? 7.0 : 0.0;
+            if (id24 != null) bearingOffset = 7.0;  // red target
+            else if (id20 != null) bearingOffset = 1.5; // blue target
+
+            // Helper function: Get current heading
+            double currentHeading = imu.getRobotYawPitchRollAngles().getYaw(AngleUnit.DEGREES);
+
+            //Auto Aim Logic
+            double autoTurn = 0;  
             if (gamepad1.y) {
-                Double bearing = null;
+                AprilTagDetection tag = null;
             
-                // Prioritize red side (id24) if present, otherwise use id20
-                if (id24 != null) {
-                    bearing = id24.ftcPose.bearing + BEARING_OFFSET;
-                } else if (id20 != null) {
-                    bearing = id20.ftcPose.bearing + BEARING_OFFSET;
-                }
+                if (id24 != null) tag = id24;
+                else if (id20 != null) tag = id20;
             
-                if (bearing != null && Math.abs(bearing) > DEAD_BAND) {
-                    autoTurn = bearing * AIM_KP;
+                if (tag != null) {
+                    double bearing = tag.ftcPose.bearing + BEARING_OFFSET;
             
-                    // Clamp
-                    autoTurn = Math.max(-MAX_TURN, Math.min(MAX_TURN, autoTurn));
+                    double currentHeading = getHeadingDeg();
+                    double targetHeading = currentHeading + bearing;
             
-                    // Minimum turn power
-                    if (Math.abs(autoTurn) < MIN_TURN) {
-                        autoTurn = Math.signum(autoTurn) * MIN_TURN;
+                    double headingError = AngleUnit.normalizeDegrees(
+                        targetHeading - currentHeading
+                    );
+            
+                    double KP_TURN = 0.015;
+                    double MAX_TURN = 0.4;
+                    double DEAD_BAND = 1.0;
+            
+                    if (Math.abs(headingError) > DEAD_BAND) {
+                        autoTurn = headingError * KP_TURN;
+                        autoTurn = Math.max(-MAX_TURN, Math.min(MAX_TURN, autoTurn));
                     }
                 }
             }
             
-            // Smooth turn output
-            autoTurn = SMOOTHING * autoTurn + (1.0 - SMOOTHING) * lastAutoTurn;
-            lastAutoTurn = autoTurn;
-
-            if (shootState != ShootState.IDLE) {
-                autoTurn = 0;
-            }
+            // Manual override
+            double manualTurn = gamepad1.left_trigger - gamepad1.right_trigger;
+            if (Math.abs(manualTurn) > 0.05) autoTurn = 0;
 
             // Blend manual + auto
-            double pa = manualTurn + autoTurn;
-            pa = Math.max(-1.0, Math.min(1.0, pa));
+            double turnCmd = manualTurn + autoTurn;
+
+            // Turn Slew Limit
+            double slewRate = 0.05; // max change per loop
+            turnCmd = lastTurnCmd + Math.max(-slewRate, Math.min(slewRate, turnCmd - lastTurnCmd));
+            lastTurnCmd = turnCmd;
 
             
-            // BODY MOVEMENT
-            double px = gamepad1.left_stick_x; //The power of the left stick on the x axis
-                                                // Left to Right, -1.00 to 1.00
-            double py = -gamepad1.left_stick_y; //The power of the left stick on the y axis
-                                                // Down to Up, -1.00 to 1.00
-            //math equation stuff...
+            //====================DRIVE CONTROL=========================//
+            double px = gamepad1.left_stick_x; //The power of the left stick on the x axis / Left to Right, -1.00 to 1.00
+            double py = -gamepad1.left_stick_y; //The power of the left stick on the y axis / Down to Up, -1.00 to 1.00
+            pa = turnCmd;
+        
+            //p1 correlates to m1, p2 correlates to m2, etc.
             
-            //p1 correlates to m1
-            //p2 correlates to m2
-            // etc.
+            //Mecanum wheel formulas
             double p1 = -px + py - pa; //bl
             double p2 = px + py + pa; //br
             double p3 = -px + py + pa; //fr
             double p4 = px + py - pa; //fl
+
+            // Normalize motor powers
             double max = Math.max(1.0, Math.abs(p1));
             max = Math.max(max, Math.abs(p2));
             max = Math.max(max, Math.abs(p3));
             max = Math.max(max, Math.abs(p4));
+            
             p1 /= max;
             p2 /= max;
             p3 /= max;
             p4 /= max;
             
-            
+            // Apply Power
             m1.setPower(p1);
             m2.setPower(p2); 
             m3.setPower(p3);
             m4.setPower(p4);
-            
-    //============================================================
-  
-            // === Fine Power Adjustment For Launching - Single press only ===
-            // increases/decreases by increments of 0.2
-            boolean yPressed = gamepad2.y;
-            boolean xPressed = gamepad2.x;
-            
-            if (yPressed && !yLastPressed) {  // Button just went down
-                if (farRange) {
-                    farVelocity = Math.min(6000, farVelocity + 500);
-                } else {
-                    closeVelocity = Math.min(6000, closeVelocity + 500);
-                }
-            }
-            
-            if (xPressed && !xLastPressed) {  // Button just went down
-                if (farRange) {
-                    farVelocity = Math.max(500, farVelocity - 500);
-                } else {
-                    closeVelocity = Math.max(500, closeVelocity - 500);
-                }
-            }
-            
-            yLastPressed = yPressed;
-            xLastPressed = xPressed;
-                
-                        
-            double goalBearing = 0;
-            if (id20 != null) {
-                goalBearing = id20.ftcPose.bearing;
-            }else if (id24 != null) {
-                goalBearing = id24.ftcPose.bearing;
-            }
-          
-            
-            //Setting mode either close or far
-            if (gamepad2.left_bumper){
-                farRange = false; //close range mode
-                
-            }else if(gamepad2.right_bumper){
-                farRange = true;  //far range mode
-            }
-            
-            //Init Sensors
-            //BottomSesnor Detect
-            if (bottomSensor.getDistance(DistanceUnit.CM) < 20) {
-                bottomSensorDetect = true;
-                
-            } else {
-                bottomSensorDetect = false;
-            }
-            
-            //TopSesnor Detect
-            if (topSensor.getDistance(DistanceUnit.CM) < 20) {
-                topSensorDetect = true;
-                
-            } else {
-                topSensorDetect = false;
-            }
-            
-            //CupSesnor Detect
-            if (cupSensor.getDistance(DistanceUnit.CM) < 20) {
-                cupSensorDetect = true;
-                
-            } else {
-                cupSensorDetect = false;
-            }
-            
-            //Launching and trigger system Manual (Legacy)
-                // //Launching
-                // if (gamepad2.right_trigger > 0) {
-                    
-                //     double targetVelocity;
-                    
-                //     if(farRange){
-                //         targetVelocity = farVelocity;
-                //     }else{
-                //         targetVelocity = closeVelocity;
-                //     }
-                    
-    
-                //     leftThrow.setVelocity(targetVelocity);
-                //     rightThrow.setVelocity(targetVelocity);
-                // } else {
-                //     leftThrow.setVelocity(0);
-                //     rightThrow.setVelocity(0);
-                // }
-                            
-                // //Trigger
-                // if(gamepad2.a){
-                //     trigger.setPosition(0.2);
-                //     runTime.reset();
-                // }else if(runTime.seconds() > 0.5 ){
-                //     trigger.setPosition(0.6);
-                // }
-            
-            //Auto Launching System
+
+            //====================Sensor Updates=========================//
+            boolean topSensorDetect = topSensor.getDistance(DistanceUnit.CM) < 20;
+            boolean bottomSensorDetect = bottomSensor.getDistance(DistanceUnit.CM) < 20;
+            boolean cupSensorDetect = cupSensor.getDistance(DistanceUnit.CM) < 20
+
+
+            //====================Shooter Control=========================//
             int detectedBalls = 0;
-            
             if (cupSensorDetect) detectedBalls++;
             if (topSensorDetect) detectedBalls++;
             if (bottomSensorDetect) detectedBalls++;
 
-            
+            //Auto Shoot Trigger
             boolean aPressed = gamepad2.a;
-
             if (aPressed && !aLastPressed && shootState == ShootState.IDLE) {
                 ballsToShoot = detectedBalls;
                 ballsShot = 0;
@@ -361,9 +279,8 @@ public class Megatron extends LinearOpMode {
                     shootTimer.reset();
                 }
             }
-            
             aLastPressed = aPressed;
-
+            //STATE MACHINE FOR AUTO SHOOTING
             switch (shootState) {
             
                 case IDLE:
@@ -426,33 +343,10 @@ public class Megatron extends LinearOpMode {
             
                     shootState = ShootState.IDLE;
                     break;
-            }
+            }   
 
-            //Feeder Logic Legacy
-                // //Top Feeder
-                // if (gamepad2.right_stick_y != 0){
-                //     double feedPower = gamepad2.right_stick_y;
-                
-                //     topFeeder.setPower(feedPower);
-                // }else {
-                //     double feedPower = 0;
-                
-                //     topFeeder.setPower(feedPower);
-                // }
-                
-                // //Bottom Feeder
-                // if (gamepad2.left_stick_y != 0){
-                //     double feedPower = -gamepad2.left_stick_y;
-                
-                //     bottomFeeder.setPower(feedPower);
-                // }else {
-                //     double feedPower = 0;
-                
-                //     bottomFeeder.setPower(feedPower);
-                // }
-
-
-                //Feeder Semi Automatic, one-joystick system when auto shooter is not activated
+            //====================Semi-Auto Feeder=========================//
+             //Feeder Semi Automatic, one-joystick system when auto shooter is not activated
                 if (shootState == ShootState.IDLE) {
 
                     // Default motor power OFF
@@ -487,6 +381,40 @@ public class Megatron extends LinearOpMode {
                         }
                     }
                 }           
+
+
+            //====================Shooter Velocity Controls=========================// 
+              
+            boolean yPressed = gamepad2.y;
+            boolean xPressed = gamepad2.x;
+            yLastPressed = yPressed;
+            xLastPressed = xPressed;
+            
+            if (yPressed && !yLastPressed) {
+                if (farRange) {
+                    farVelocity = Math.min(6000, farVelocity + 500);
+                } else {
+                    closeVelocity = Math.min(6000, closeVelocity + 500);
+                }
+            }
+            
+            if (xPressed && !xLastPressed) {
+                if (farRange) {
+                    farVelocity = Math.max(500, farVelocity - 500);
+                } else {
+                    closeVelocity = Math.max(500, closeVelocity - 500);
+                }
+            }
+
+            //Range Toggle
+            if (gamepad2.left_bumper){
+                farRange = false; //close range mode
+                
+            }else if(gamepad2.right_bumper){
+                farRange = true;  //far range mode
+            }
+            
+        
             //=========================TELEMETRY===============================
             
             //ID 20 Telemetry from WebCam
@@ -496,63 +424,39 @@ public class Megatron extends LinearOpMode {
             telemetry.addData("Motor Encoders"," %d %d %d %d", m1.getCurrentPosition(), m2.getCurrentPosition(),
                     m3.getCurrentPosition(), m4.getCurrentPosition());
                     
-            //Display current throwing mode
+            //Shooter
+            telemetry.addLine("===Shooter MODE===");
             if(farRange == true){
                 telemetry.addData("Far Range Mode Activated", "");
             }else{
                  telemetry.addData("Close Range Mode Activated", "");
             }
-            
-            telemetry.addLine();
-            
-            //Testing sensors for Feeder
-            if(cupSensorDetect == true){
-                telemetry.addData("Cup Sensor Detecting", "");
-            }else{
-                 telemetry.addData("No Cup Sensor", "");
-            }
-            
-            if(topSensorDetect == true){
-                telemetry.addData("Top Sensor Detecting", "");
-            }else{
-                 telemetry.addData("No Top Sensor", "");
-            }
-            
-            if(bottomSensorDetect == true){
-                telemetry.addData("Bottom Sensor Detecting", "");
-            }else{
-                 telemetry.addData("No Bottom Sensor", "");
-            }
-
-            telemetry.addData("Top (cm)", topSensor.getDistance(DistanceUnit.CM));
-            telemetry.addData("Bottom (cm)", bottomSensor.getDistance(DistanceUnit.CM));
-            telemetry.addData("Cup (cm)", cupSensor.getDistance(DistanceUnit.CM));
-
-            
-            telemetry.addLine();
-
-
-            telemetry.addData("Shoot State", shootState);
-            telemetry.addData("Balls To Shoot", ballsToShoot);
-            telemetry.addData("Balls Shot", ballsShot);
-
-            telemetry.addLine();
             //Display far and close power values
             telemetry.addData("Close Motor Velocity", "%.2f", closeVelocity);
             telemetry.addData("Far Motor Velocity", "%.2f", farVelocity);
-            
-            telemetry.update();
-            
+            //STATES
+            telemetry.addLine("=== Shooter STATES ===");
+            telemetry.addData("Shoot State", shootState);
+            telemetry.addData("Balls To Shoot", ballsToShoot);
+            telemetry.addData("Balls Shot", ballsShot);
             telemetry.addLine();
-
-            telemetry.addData("Y pressed", gamepad1.y);
+            
+            //Testing sensors for Feeder
+            telemetry.addLine("=== Sensors ===");
+            telemetry.addData("Cup", cupSensorDetect);
+            telemetry.addData("Top", topSensorDetect);
+            telemetry.addData("Bottom", bottomSensorDetect);
+            telemetry.addData("Cup (cm)", "%.1f", cupSensor.getDistance(DistanceUnit.CM));
+            telemetry.addData("Top (cm)", "%.1f", topSensor.getDistance(DistanceUnit.CM));
+            telemetry.addData("Bottom (cm)", "%.1f", bottomSensor.getDistance(DistanceUnit.CM));
+    
+            telemetry.addLine("==WebCam Vision===");
             telemetry.addData("Tag Found", id20 != null || id24 != null);
-            if (id20 != null) {
-                telemetry.addData("Bearing", "%.2f", id20.ftcPose.bearing);
-            }else if(id24 !=null){
-                telemetry.addData("Bearing", "%.2f", id24.ftcPose.bearing);
-            }
+            if (id20 != null) telemetry.addData("Bearing", "%.2f", id20.ftcPose.bearing);
+            if(id24 !=null) telemetry.addData("Bearing", "%.2f", id24.ftcPose.bearing);
+
             telemetry.addData("autoTurn", "%.2f", autoTurn);
+            telemetry.update();
         }
         //Stops all motors
         m1.setPower(0);
