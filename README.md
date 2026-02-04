@@ -1,7 +1,7 @@
-# 🤖 FTC 2025-2026 Code for Megatron (Final Robotics Tournament) 🤖
+# 🤖 FTC 2025-2026 Code for Megatron (Robotics Tournament) 🤖
 
 ## Game Summary 🎮
-
+  
 ## Code Summary 🧑‍💻
   # Teleop
   # Autonomus
