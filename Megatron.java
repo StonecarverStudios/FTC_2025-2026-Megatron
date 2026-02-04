@@ -1,6 +1,7 @@
 package org.firstinspires.ftc.teamcode;
 
 import com.qualcomm.robotcore.eventloop.opmode.TeleOp;
+import org.firstinspires.ftc.robotcore.external.navigation.DistanceUnit;
 import com.qualcomm.robotcore.eventloop.opmode.LinearOpMode;
 import com.qualcomm.robotcore.hardware.DcMotorEx;
 import com.qualcomm.robotcore.hardware.DcMotor;
@@ -36,7 +37,13 @@ public class Megatron extends LinearOpMode {
     
     //=================STATES======================//
     enum ShootState {
-        IDLE, SPIN_UP, FEEDING, FIRING, WAIT_CLEAR, DONE
+        IDLE, 
+        SPIN_UP, 
+        FEEDING, 
+        FIRING, 
+        WAIT_CLEAR, 
+        DONE, 
+        ABORT
     }
     
     ShootState shootState = ShootState.IDLE;
@@ -46,6 +53,8 @@ public class Megatron extends LinearOpMode {
     
     ElapsedTime shootTimer = new ElapsedTime();
     ElapsedTime runTime = new ElapsedTime();
+    ElapsedTime cupDebounceTimer = new ElapsedTime();
+
     
     boolean aLastPressed = false;
     boolean cupLastDetect = true;
@@ -53,6 +62,12 @@ public class Megatron extends LinearOpMode {
 
     //====================DRIVE CONTROL=========================//
     double lastTurnCmd = 0; // for slew limiting
+    
+    //====================IMU INIT VARIABLES=========================//
+    double getHeadingDeg() {
+            YawPitchRollAngles ypr = imu.getRobotYawPitchRollAngles();
+            return ypr.getYaw(AngleUnit.DEGREES);
+        }
 
     @Override
     public void runOpMode(){
@@ -116,10 +131,6 @@ public class Megatron extends LinearOpMode {
 
         //Motor Modes
         //Reset the encoders on Init, and set them to the correct mode 
-        m1.setMode(DcMotor.RunMode.RUN_WITHOUT_ENCODER);
-        m2.setMode(DcMotor.RunMode.RUN_WITHOUT_ENCODER);
-        m3.setMode(DcMotor.RunMode.RUN_WITHOUT_ENCODER);
-        m4.setMode(DcMotor.RunMode.RUN_WITHOUT_ENCODER);
         leftThrow.setMode(DcMotor.RunMode.RUN_USING_ENCODER);
         rightThrow.setMode(DcMotor.RunMode.RUN_USING_ENCODER);
 
@@ -134,22 +145,14 @@ public class Megatron extends LinearOpMode {
 
         //====================USER SETTINGS=========================//
         //Default shooting to far
-        boolean farRange = true;
+        boolean farRange = false;
         
         //Power to the throwing motors
-        double closeVelocity = 1700.0;
-        double farVelocity = 3000.0
+        double closeVelocity = 1400.0;
+        double farVelocity = 1500.0;
         
-        
-
         //====================OTHER SETTINGS / INIT VARIABLES=========================//
-        //IMU
-        double getHeadingDeg() {
-            YawPitchRollAngles ypr = imu.getRobotYawPitchRollAngles();
-            return ypr.getYaw(AngleUnit.DEGREES);
-        }
-        double lastTurnCmd = 0;
-
+    
         //Sensor Variables
         boolean topSensorDetect = true;
         boolean bottomSensorDetect = true;
@@ -158,6 +161,16 @@ public class Megatron extends LinearOpMode {
         //isLogged for fine power adjuster
         boolean yLastPressed = false;
         boolean xLastPressed = false;
+        boolean dpadLeftLastPressed = false;
+        boolean isLogged = false;
+
+        boolean stealthMode = false;
+    
+        //IMU atuo turn
+        double filteredHeadingRate = 0;
+        boolean firingStarted = false;
+
+    
 
         //====================READY TO START=========================//
         telemetry.addData("Press Start When Ready","");
@@ -166,7 +179,6 @@ public class Megatron extends LinearOpMode {
         
         waitForStart();
         runTime.reset();
-
 
         //====================MAIN LOOP=========================//
         while (opModeIsActive()) {
@@ -178,11 +190,8 @@ public class Megatron extends LinearOpMode {
             
             //Auto Aim Calculation 
             double BEARING_OFFSET = farRange ? 7.0 : 0.0;
-            if (id24 != null) bearingOffset = 7.0;  // red target
-            else if (id20 != null) bearingOffset = 1.5; // blue target
-
-            // Helper function: Get current heading
-            double currentHeading = imu.getRobotYawPitchRollAngles().getYaw(AngleUnit.DEGREES);
+            if (id24 != null) BEARING_OFFSET = 4.0;  // red target
+            else if (id20 != null) BEARING_OFFSET = 2.0; // blue target
 
             //Auto Aim Logic
             double autoTurn = 0;  
@@ -213,23 +222,41 @@ public class Megatron extends LinearOpMode {
                 }
             }
             
-            // Manual override
-            double manualTurn = gamepad1.left_trigger - gamepad1.right_trigger;
+            // Manual override4
+            //Manual override 
+            double manualTurn = gamepad1.left_trigger - gamepad1.right_trigger; 
             if (Math.abs(manualTurn) > 0.05) autoTurn = 0;
-
-            // Blend manual + auto
-            double turnCmd = manualTurn + autoTurn;
-
-            // Turn Slew Limit
-            double slewRate = 0.05; // max change per loop
-            turnCmd = lastTurnCmd + Math.max(-slewRate, Math.min(slewRate, turnCmd - lastTurnCmd));
-            lastTurnCmd = turnCmd;
-
             
+            
+            double turnCmd;
+
+            // --- Manual turn ---
+            if (Math.abs(manualTurn) > 0.05) {
+                turnCmd = manualTurn;
+            }
+            
+            // --- Auto aim ---
+            else if (gamepad1.y && Math.abs(autoTurn) > 0) {
+                turnCmd = autoTurn;
+            }
+            
+            // --- Yaw damping ---
+            else {
+                double KD = 0.001;
+                turnCmd = -filteredHeadingRate * KD;
+            
+                if (Math.abs(filteredHeadingRate) < 2.0) {
+                    turnCmd = 0;
+                }
+            }
+
+
+
+
             //====================DRIVE CONTROL=========================//
             double px = gamepad1.left_stick_x; //The power of the left stick on the x axis / Left to Right, -1.00 to 1.00
             double py = -gamepad1.left_stick_y; //The power of the left stick on the y axis / Down to Up, -1.00 to 1.00
-            pa = turnCmd;
+            double pa = turnCmd;
         
             //p1 correlates to m1, p2 correlates to m2, etc.
             
@@ -255,21 +282,89 @@ public class Megatron extends LinearOpMode {
             m2.setPower(p2); 
             m3.setPower(p3);
             m4.setPower(p4);
+            
+            //====================Stealth mode=========================//
+            
+            if(gamepad1.guide && isLogged == false){
+                if(stealthMode == false) stealthMode = true;
+                else if(stealthMode == true) stealthMode = false;
+                isLogged = true;
+                
+            }else if (gamepad1.guide != true){
+                isLogged = false;
+            }
+            
+            if(stealthMode == true){
+                m1.setPower(p1 * 0.1);
+                m2.setPower(p2 * 0.1);
+                m3.setPower(p3 * 0.1);
+                m4.setPower(p4 * 0.1);
+            }else {
+                m1.setPower(p1 * 0.7);
+                m2.setPower(p2 * 0.7);
+                m3.setPower(p3 * 0.7);
+                m4.setPower(p4 * 0.7);
+            }
 
             //====================Sensor Updates=========================//
-            boolean topSensorDetect = topSensor.getDistance(DistanceUnit.CM) < 20;
-            boolean bottomSensorDetect = bottomSensor.getDistance(DistanceUnit.CM) < 20;
-            boolean cupSensorDetect = cupSensor.getDistance(DistanceUnit.CM) < 20
+            topSensorDetect = topSensor.getDistance(DistanceUnit.CM) < 20;
+            bottomSensorDetect = bottomSensor.getDistance(DistanceUnit.CM) < 20;
+            cupSensorDetect = cupSensor.getDistance(DistanceUnit.CM) < 20;
+            
+            
+            //====================Shooter Velocity Controls=========================// 
+            
+             //Range Toggle
+            if (gamepad2.left_bumper){
+                farRange = false; //close range mode
+                
+            }else if(gamepad2.right_bumper){
+                farRange = true;  //far range mode
+            }
+            
+            //Velocity fine tune adjuster
+            boolean yPressed = gamepad2.y;
+            boolean xPressed = gamepad2.x;
+            
+            if (yPressed && !yLastPressed) {
+                if (farRange) {
+                    farVelocity = Math.min(6000, farVelocity + 50);
+                } else {
+                    closeVelocity = Math.min(6000, closeVelocity + 50);
+                }
+            }
+            
+            if (xPressed && !xLastPressed) {
+                if (farRange) {
+                    farVelocity = Math.max(500, farVelocity - 50);
+                } else {
+                    closeVelocity = Math.max(500, closeVelocity - 50);
+                }
+            }
+        
+            yLastPressed = yPressed;
+            xLastPressed = xPressed;
 
 
             //====================Shooter Control=========================//
+            //ABORT LOGIC
+            boolean dpadLeftPressed = gamepad2.dpad_left;
+
+            if (dpadLeftPressed && !dpadLeftLastPressed) {
+                shootState = ShootState.ABORT; // trigger abort immediately
+            }
+            
+            dpadLeftLastPressed = dpadLeftPressed;
+
             int detectedBalls = 0;
+            
             if (cupSensorDetect) detectedBalls++;
             if (topSensorDetect) detectedBalls++;
             if (bottomSensorDetect) detectedBalls++;
 
-            //Auto Shoot Trigger
+            
             boolean aPressed = gamepad2.a;
+
             if (aPressed && !aLastPressed && shootState == ShootState.IDLE) {
                 ballsToShoot = detectedBalls;
                 ballsShot = 0;
@@ -278,30 +373,34 @@ public class Megatron extends LinearOpMode {
                     shootState = ShootState.SPIN_UP;
                     shootTimer.reset();
                 }
+               
             }
+
             aLastPressed = aPressed;
-            //STATE MACHINE FOR AUTO SHOOTING
+
             switch (shootState) {
-            
+
                 case IDLE:
                     // Do nothing
                     break;
-            
-                case SPIN_UP:
+                
+                //Spin up shooter state -> spin up shooter motors until correct velocity reached
                     double targetVelocity = farRange ? farVelocity : closeVelocity;
                     leftThrow.setVelocity(targetVelocity);
                     rightThrow.setVelocity(targetVelocity);
-            
-                    if (shootTimer.seconds() > 1.5) {
+
+    
+                    if (shootTimer.seconds() > 2.0) {
                         shootState = ShootState.FEEDING;
                     }
                     break;
-            
+                
+                //Feeder state -> Keep feeding the balls forward until there is a ball in the cup
                 case FEEDING:
-                    // Move balls until one reaches cup
+                    
                     if (!cupSensorDetect) {
-                        topFeeder.setPower(1.0);
-                        bottomFeeder.setPower(-1.0);
+                        topFeeder.setPower(-1.0);
+                        bottomFeeder.setPower(1.0);
                     } else {
                         topFeeder.setPower(0);
                         bottomFeeder.setPower(0);
@@ -309,32 +408,41 @@ public class Megatron extends LinearOpMode {
                         shootTimer.reset();
                     }
                     break;
-            
+
+                //Firing state -> fire the ball in the cup
                 case FIRING:
                     trigger.setPosition(0.2); // fire
-            
-                    if (shootTimer.seconds() > 0.4) {
+                
+                    if (shootTimer.seconds() > 0.8) {
                         trigger.setPosition(0.6);
                         shootState = ShootState.WAIT_CLEAR;
                         shootTimer.reset();
-                    }
-                    break;
-            
-                case WAIT_CLEAR:
-                    // Wait until ball leaves cup
-                    if (cupLastDetect && !cupSensorDetect) {
+                        cupDebounceTimer.reset(); // start debounce timer
+                        cupLastDetect = true;
                         ballsShot++;
                     }
-                    cupLastDetect = cupSensorDetect;
-
-                    
-                    if (ballsShot >= ballsToShoot) {
-                        shootState = ShootState.DONE;
-                    } else {
-                        shootState = ShootState.FEEDING;
-                    }
-
                     break;
+
+                //Wait clear state -> if there are still balls to shoot, go back to feeding state, if not go to Done state.
+                case WAIT_CLEAR:
+    
+                    topFeeder.setPower(0);
+                    bottomFeeder.setPower(0);
+                
+                    if (shootTimer.seconds() > 0.2) {
+                        if (cupLastDetect && !cupSensorDetect) {
+                            if (ballsShot >= ballsToShoot) {
+                                shootState = ShootState.DONE;
+                            } else {
+                                shootState = ShootState.FEEDING;
+                            }
+                            cupLastDetect = cupSensorDetect;
+                        }
+                        
+                    }
+                    break;
+
+                //Done state -> turn off everything and set back to idle to await next loop
                 case DONE:
                     leftThrow.setVelocity(0);
                     rightThrow.setVelocity(0);
@@ -343,78 +451,54 @@ public class Megatron extends LinearOpMode {
             
                     shootState = ShootState.IDLE;
                     break;
-            }   
-
-            //====================Semi-Auto Feeder=========================//
-             //Feeder Semi Automatic, one-joystick system when auto shooter is not activated
-                if (shootState == ShootState.IDLE) {
-
-                    // Default motor power OFF
-                    double feederPower = gamepad2.right_stick_y;
+                
+                //Abort case ->Abort process no matter current state, similar to DONE and sets back to IDLE
+                case ABORT:
+                    leftThrow.setVelocity(0);
+                    rightThrow.setVelocity(0);
                     topFeeder.setPower(0);
                     bottomFeeder.setPower(0);
+                    trigger.setPosition(0.6);
                     
-                    // Only run feeder logic if operator commands it
-                    if (Math.abs(feederPower) > 0) {
-                    
-                        // Case 1: Cup empty → feed upward
-                        if (!cupSensorDetect) {
-                            topFeeder.setPower(feederPower);
-                            bottomFeeder.setPower(-feederPower);
-                        }
-                    
-                        // Case 2: Cup full, top empty → move bottom one up
-                        else if (cupSensorDetect && !topSensorDetect) {
-                            topFeeder.setPower(feederPower);
-                            bottomFeeder.setPower(-feederPower);
-                        }
-                    
-                        // Case 3: Cup and top full, bottom empty → fill bottom only
-                        else if (cupSensorDetect && topSensorDetect && !bottomSensorDetect) {
-                            bottomFeeder.setPower(-feederPower);
-                        }
-                    
-                        // Case 4: Everything full → stop
-                        else {
-                            topFeeder.setPower(0);
-                            bottomFeeder.setPower(0);
-                        }
-                    }
-                }           
+                    ballsToShoot = 0;
+                    shootState = ShootState.IDLE;
+                    break;
+            }
 
-
-            //====================Shooter Velocity Controls=========================// 
-              
-            boolean yPressed = gamepad2.y;
-            boolean xPressed = gamepad2.x;
-            yLastPressed = yPressed;
-            xLastPressed = xPressed;
+        //=========================FEEDER===============================
+           //Feeder Semi Automatic, one-joystick system when auto shooter is not activated
+            if (shootState == ShootState.IDLE) {
+    
+                // Default motor power OFF
+                double feederPower = gamepad2.right_stick_y;
+                topFeeder.setPower(0);
+                bottomFeeder.setPower(0);
             
-            if (yPressed && !yLastPressed) {
-                if (farRange) {
-                    farVelocity = Math.min(6000, farVelocity + 500);
-                } else {
-                    closeVelocity = Math.min(6000, closeVelocity + 500);
+            
+                // Case 1: Cup empty → feed upward
+                if (!cupSensorDetect) {
+                    topFeeder.setPower(feederPower);
+                    bottomFeeder.setPower(-feederPower);
                 }
-            }
             
-            if (xPressed && !xLastPressed) {
-                if (farRange) {
-                    farVelocity = Math.max(500, farVelocity - 500);
-                } else {
-                    closeVelocity = Math.max(500, closeVelocity - 500);
+                // Case 2: Cup full, top empty → move bottom one up
+                else if (cupSensorDetect && !topSensorDetect) {
+                    topFeeder.setPower(feederPower);
+                    bottomFeeder.setPower(-feederPower);
                 }
-            }
-
-            //Range Toggle
-            if (gamepad2.left_bumper){
-                farRange = false; //close range mode
-                
-            }else if(gamepad2.right_bumper){
-                farRange = true;  //far range mode
-            }
             
-        
+                // Case 3: Cup and top full, bottom empty → fill bottom only
+                else if (cupSensorDetect && topSensorDetect && !bottomSensorDetect) {
+                    bottomFeeder.setPower(-feederPower);
+                }
+            
+                // Case 4: Everything full → stop
+                else {
+                    topFeeder.setPower(0);
+                    bottomFeeder.setPower(0);
+                }
+        }
+    
             //=========================TELEMETRY===============================
             
             //ID 20 Telemetry from WebCam
@@ -439,6 +523,7 @@ public class Megatron extends LinearOpMode {
             telemetry.addData("Shoot State", shootState);
             telemetry.addData("Balls To Shoot", ballsToShoot);
             telemetry.addData("Balls Shot", ballsShot);
+            telemetry.addData("Cup Last Detect", cupLastDetect);
             telemetry.addLine();
             
             //Testing sensors for Feeder
@@ -449,12 +534,13 @@ public class Megatron extends LinearOpMode {
             telemetry.addData("Cup (cm)", "%.1f", cupSensor.getDistance(DistanceUnit.CM));
             telemetry.addData("Top (cm)", "%.1f", topSensor.getDistance(DistanceUnit.CM));
             telemetry.addData("Bottom (cm)", "%.1f", bottomSensor.getDistance(DistanceUnit.CM));
-    
+            telemetry.addLine();
+            
             telemetry.addLine("==WebCam Vision===");
             telemetry.addData("Tag Found", id20 != null || id24 != null);
             if (id20 != null) telemetry.addData("Bearing", "%.2f", id20.ftcPose.bearing);
             if(id24 !=null) telemetry.addData("Bearing", "%.2f", id24.ftcPose.bearing);
-
+            telemetry.addLine();
             telemetry.addData("autoTurn", "%.2f", autoTurn);
             telemetry.update();
         }
